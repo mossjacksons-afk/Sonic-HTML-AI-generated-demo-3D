@@ -150,8 +150,12 @@ function loadSonicModel(objUrl, mtlUrl) {
     });
 }
 
-// Replace these string URLs with direct public HTTP links to your hosted assets
-loadSonicModel('SonicTheHedgehog.obj', 'SonicTheHedgehog.mtl');
+// Load 3D model from GitHub repository using raw URLs
+// Replace YourModel with your actual OBJ and MTL filenames
+loadSonicModel(
+    'https://raw.githubusercontent.com/mossjacksons-afk/Sonic-HTML-AI-generated-demo-3D/main/YourModel.obj',
+    'https://raw.githubusercontent.com/mossjacksons-afk/Sonic-HTML-AI-generated-demo-3D/main/YourModel.mtl'
+);
 
 // --- 4. CONTROLS & PHYSICS LOGIC ---
 const keys = {};
