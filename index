@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Sonic Engine - OneCompiler Safe Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #hud {
+            position: absolute; top: 10px; left: 10px; color: #fff;
+            background: rgba(0,0,0,0.6); padding: 12px; border-radius: 6px;
+            pointer-events: none; font-size: 14px;
+        }
+    </style>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OBJ and MTL Loaders -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <!-- Cannon.js for Physics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+</head>
+<body>
+
+<div id="hud">
+    <b>3D Sonic Physics Engine</b><br>
+    WASD / Arrows: Direction<br>
+    Space: Jump<br>
+    Shift: Boost<br>
+    <span id="speedometer">Speed: 0 u/s</span>
+</div>
+
+<script>
+// --- 1. SCENE & PHYSICS SETUP ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x40a0ff);
+scene.fog = new THREE.FogExp2(0x40a0ff, 0.015);
+
+const world = new CANNON.World();
+world.gravity.set(0, -28, 0);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+scene.add(ambientLight);
+
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(50, 100, 50);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun);
+
+// --- 2. TERRAIN & ENVIRONMENT ---
+const groundMat = new CANNON.Material("ground");
+const playerMat = new CANNON.Material("player");
+
+const contactMat = new CANNON.ContactMaterial(groundMat, playerMat, {
+    friction: 0.1,
+    restitution: 0.0
+});
+world.addContactMaterial(contactMat);
+
+// Flat Ground
+const floorBody = new CANNON.Body({ mass: 0, material: groundMat });
+floorBody.addShape(new CANNON.Plane());
+floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+world.addBody(floorBody);
+
+const floorMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshStandardMaterial({ color: 0x22aa33 })
+);
+floorMesh.rotation.x = -Math.PI / 2;
+floorMesh.receiveShadow = true;
+scene.add(floorMesh);
+
+// Curved Ramp / Loop-De-Loop Segment
+const rampGeo = new THREE.CylinderGeometry(15, 15, 12, 32, 1, true, 0, Math.PI);
+const rampMat = new THREE.MeshStandardMaterial({ color: 0xdd8822, side: THREE.DoubleSide });
+const rampMesh = new THREE.Mesh(rampGeo, rampMat);
+rampMesh.position.set(0, 15, -60);
+rampMesh.rotation.z = Math.PI / 2;
+scene.add(rampMesh);
+
+for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI;
+    const x = 0;
+    const y = 15 - Math.cos(angle) * 15;
+    const z = -60 - Math.sin(angle) * 15;
+
+    const stepBody = new CANNON.Body({ mass: 0, material: groundMat });
+    stepBody.addShape(new CANNON.Box(new CANNON.Vec3(6, 1, 3)));
+    stepBody.position.set(x, y, z);
+    stepBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -angle);
+    world.addBody(stepBody);
+}
+
+// --- 3. PHYSICS BODY & SAFE MODEL LOADING ---
+const radius = 1.0;
+const playerBody = new CANNON.Body({
+    mass: 5,
+    material: playerMat,
+    shape: new CANNON.Sphere(radius),
+    linearDamping: 0.05
+});
+playerBody.position.set(0, 2, 0);
+world.addBody(playerBody);
+
+// Default player mesh (prevents crashes if model loading fails)
+const playerMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0x0044ff, roughness: 0.3 })
+);
+playerMesh.castShadow = true;
+scene.add(playerMesh);
+
+let sonicModel = null;
+
+// Safe asset loader with error handling
+function loadSonicModel(objUrl, mtlUrl) {
+    const mtlLoader = new THREE.MTLLoader();
+    mtlLoader.load(mtlUrl, (materials) => {
+        materials.preload();
+        
+        const objLoader = new THREE.OBJLoader();
+        objLoader.setMaterials(materials);
+        objLoader.load(objUrl, (object) => {
+            sonicModel = object;
+            sonicModel.scale.set(0.08, 0.08, 0.08);
+
+            sonicModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+
+            scene.add(sonicModel);
+            scene.remove(playerMesh); // Replace simple sphere with 3D model
+        }, undefined, (err) => {
+            console.warn("Could not load OBJ model, falling back to basic mesh.");
+        });
+    }, undefined, (err) => {
+        console.warn("Could not load MTL materials, falling back to basic mesh.");
+    });
+}
+
+// Replace these string URLs with direct public HTTP links to your hosted assets
+loadSonicModel('SonicTheHedgehog.obj', 'SonicTheHedgehog.mtl');
+
+// --- 4. CONTROLS & PHYSICS LOGIC ---
+const keys = {};
+let isGrounded = false;
+
+document.addEventListener('keydown', (e) => keys[e.code] = true);
+document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+function checkGrounded() {
+    return playerBody.position.y <= radius + 0.1;
+}
+
+// --- 5. GAME LOOP ---
+const clock = new THREE.Clock();
+
+function animate() {
+    requestAnimationFrame(animate);
+    const delta = Math.min(clock.getDelta(), 0.1);
+    world.step(1 / 60, delta, 3);
+
+    isGrounded = checkGrounded();
+
+    const topSpeed = keys['ShiftLeft'] || keys['ShiftRight'] ? 65 : 35;
+    const accelForce = 45;
+    const force = new CANNON.Vec3(0, 0, 0);
+
+    if (keys['KeyW'] || keys['ArrowUp']) force.z -= accelForce;
+    if (keys['KeyS'] || keys['ArrowDown']) force.z += accelForce;
+    if (keys['KeyA'] || keys['ArrowLeft']) force.x -= accelForce;
+    if (keys['KeyD'] || keys['ArrowRight']) force.x += accelForce;
+
+    const currentSpeed = Math.sqrt(playerBody.velocity.x ** 2 + playerBody.velocity.z ** 2);
+    if (currentSpeed < topSpeed) {
+        playerBody.applyForce(force, playerBody.position);
+    }
+
+    if (keys['Space'] && isGrounded) {
+        playerBody.velocity.y = 18;
+        isGrounded = false;
+    }
+
+    // Render Sync
+    if (sonicModel) {
+        sonicModel.position.copy(playerBody.position);
+        sonicModel.position.y -= radius;
+
+        if (Math.abs(playerBody.velocity.x) > 0.5 || Math.abs(playerBody.velocity.z) > 0.5) {
+            const angle = Math.atan2(playerBody.velocity.x, playerBody.velocity.z);
+            sonicModel.rotation.y = angle;
+        }
+    } else {
+        playerMesh.position.copy(playerBody.position);
+        playerMesh.quaternion.copy(playerBody.quaternion);
+    }
+
+    // Camera Tracking
+    const targetCamPos = new THREE.Vector3(
+        playerBody.position.x,
+        playerBody.position.y + 4 + (currentSpeed * 0.05),
+        playerBody.position.z + 12 + (currentSpeed * 0.1)
+    );
+    camera.position.lerp(targetCamPos, 0.1);
+    camera.lookAt(playerBody.position.x, playerBody.position.y + 1, playerBody.position.z);
+
+    document.getElementById('speedometer').innerText = `Speed: ${Math.round(currentSpeed)} u/s`;
+
+    renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
