@@ -131,7 +131,7 @@ function loadSonicModel(objUrl, mtlUrl) {
         objLoader.setMaterials(materials);
         objLoader.load(objUrl, (object) => {
             sonicModel = object;
-            sonicModel.scale.set(0.2, 0.2, 0.2);
+            sonicModel.scale.set(1.8, 1.8, 1.8);
 
             sonicModel.traverse((child) => {
                 if (child.isMesh) {
